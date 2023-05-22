@@ -1,0 +1,304 @@
+---
+title: "Bellabeat Case Study"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+#### **Ask**
+  + About the Company
+    - Bellabeat is a high-tech company that specializes in health-focused smart devices.
+    - Co-founded by Urška Sršen and Sando Mur
+    - Through it's rapid growth, Bellabeat has shown itself to be a wellness tech company geared for women.
+  + Guiding Questions
+    - Are there any trends in the usage of smart devices?
+    - How can we apply them to Bellabeat customers?
+    - How can they influence Bellabeat marketing strategies?
+    
+#### **Prepare**
+  + Data was sourced from the following:
+    - [Replication Data for: Dataset of Consumer-Based Activity Trackers as a Tool for Physical Activity Monitoring in Epidemiological Studies During the COVID-19 Pandemic](https://dataverse.no/dataset.xhtml?persistentId=doi:10.18710/TGGCSZ) Henriksen, André; Johannessen, Erlend; Hartvigsen, Gunnar; Grimsgaard, Sameline; Hopstock, Laila Arnesdatter, 2021
+    - [FitBit Fitness Tracker Data](https://www.kaggle.com/arashnic/fitbit) (CC0: Public Domain, dataset made available through [Mobius](https://www.kaggle.com/arashnic))
+  
+  + The Mobius data has some concerns due to various factors such as:
+    - Age of data
+    - Small sample size of 33
+    - Short duration study of approx. one month
+  
+  + The data gathered by Henriksen et al. has its own concerns but has a larger sample size of 113
+    - More current data of 2019-2020
+    - Has data from 2 providers of Garmin and Fitbit
+    - subjects also started at different times
+    - much longer study of around 15 months up to Covid-19 lockdown
+  
+  + Utilized the following R programming codes to load packages and data:
+    
+```{r}
+options(repos = list(CRAN="http://cran.rstudio.com/"))
+install.packages('tidyverse')
+install.packages('skimr')
+install.packages('janitor')
+install.packages('here')
+install.packages('dplyr')
+install.packages('patchwork')
+install.packages('imputeTS')
+install.packages('hablar')
+install.packages('ggpubr')
+install.packages('gridExtra')
+install.packages('cowplot')
+
+
+
+##Loads previous packages
+suppressPackageStartupMessages(library(tidyverse));
+suppressPackageStartupMessages(library(skimr));
+suppressPackageStartupMessages(library(janitor));
+suppressPackageStartupMessages(library('here'));
+suppressPackageStartupMessages(library(dplyr));
+suppressPackageStartupMessages(library('hablar'));
+suppressPackageStartupMessages(library('imputeTS'));
+suppressPackageStartupMessages(library(forcats));
+suppressPackageStartupMessages(library(patchwork));
+suppressPackageStartupMessages(library(hablar));
+suppressPackageStartupMessages(library(ggpubr));
+suppressPackageStartupMessages(library(gridExtra));
+suppressPackageStartupMessages(library('cowplot'))
+```
+        - CleaningPackages.R:
+```{r}
+library(tidyverse)
+library(readr)
+
+##Fitness Data from Dataverse on smart devices
+henrd <- read_table("fitness_data_dataverse/data raw.csv")
+henma <- read_table("fitness_data_dataverse/data.csv")
+
+##Kaggle Fitbit Data Dailies
+kagdam <- read_csv("fitness_fitbit_data_kaggle/dailyActivity_merged.csv")
+```
+        - Load_Data.R
+
+  + Data naming convention:
+    - First three characters from source:
+      + Henriksen et al. -> 'hen'
+      + Kaggle -> 'kag'
+    - 'Initials' of purpose:
+      + Raw Data -> 'rd'
+      + Monthly Average -> 'ma'
+      + Daily Activity Merged -> 'dam'
+  
+  + Cleaning Process:
+```{r}
+##Check what type of cleaning needed
+skim_without_charts(henma)
+glimpse(henma)
+
+skim_without_charts(henrd)
+glimpse(henrd)
+
+skim_without_charts(kagdam)
+glimpse(kagdam)
+
+##Replace NULLs and convert data to numeric/factor types
+henma2 <- mutate_all(henma, funs(str_replace(., "NULL", "0"))) %>%
+  as.data.frame() %>%
+  convert(num(-Provider),
+          fct(Provider))%>%
+  clean_names()
+
+##Standardize Naming
+henrd2 <- clean_names(henrd) %>%
+  relocate(provider, .after = id) ##move provider column next to id as in henma2
+
+kagdam2 <- clean_names(kagdam)
+
+```
+      - Data_Cleaning.R
+#### **Analyze**
+  + I started with adding columns for quicker access to totals
+```{r}
+henma3 <- henma2[,!grepl("^2020",names(henma2))] %>%
+  relocate(x2019_steps, .after = provider) %>%
+  relocate(x2020_steps, .after = x2019_steps)%>%
+  mutate(xmean_steps = round(rowMeans(cbind(henma2$x2019_steps, henma2$x2020_steps), na.rm = TRUE)))%>%
+  relocate(xmean_steps, .before = x2019_steps)%>%
+  mutate(xtotal_mvpa = round(rowMeans(select(.,ends_with('mvpa'))))) %>%
+  relocate(xtotal_mvpa, .after = provider) %>%
+  mutate(xtotal_tee = round(rowMeans(select(.,ends_with('tee'))))) %>%
+  relocate(xtotal_tee, .after = provider) %>%
+  mutate(xtotal_aee = round(rowMeans(select(.,ends_with('aee'))))) %>%
+  relocate(xtotal_aee, .after = provider)
+```
+          - Addition of Mean
+```{r}
+henma3 <- henma3 %>%
+  mutate(xtotal_actime = rowMeans(cbind(henma3$x2020_lpa, henma3$x2019_lpa, henma3$x2019_mpa, henma3$x2020_mpa, henma3$x2019_vpa, henma3$x2020_vpa))) %>%
+  relocate(xtotal_actime, .after = xtotal_mvpa)
+```
+          - Last bit of code for Means
+  + Then I plotted various correlations using ggplot due to my visual learning style which allowed me to get a better grasp of things.
+  + This led me to my conclusion that follows:
+  
+#### **Share**
+    
+        - Kaggle Calories:Distance
+```{r}
+##Plot uses geom_jitter and geom_smooth for an easier comparison of the data points
+##Colors were chosen for contrast with the alpha being lowered for points to distinguish them easier
+cdp<-ggplot(kagdam2, aes(y = calories, 
+                            x = tracker_distance))+
+  geom_jitter(color = 'dodgerblue4', alpha = 0.3)+theme_light()+
+  theme(legend.position = 'none')+
+  geom_smooth(method = 'lm', color = 'red')+
+  xlab(label = 'Distance taken from Tracker (miles)')+
+  ylab(label = 'Calories')+
+  ggtitle(label = 'Relational Plot', 
+          subtitle = 'Tracker Distance and Calories')
+plot(cdp)
+```
+    
+        - Kaggle Calories:Steps
+```{r}
+##Plot follows similar format as previous with total_steps taking over for distance
+csp<-ggplot(kagdam2, aes(y = calories, 
+                            x = total_steps))+                         
+  geom_jitter(color = 'dodgerblue4', alpha = 0.3)+theme_light()+
+  theme(legend.position = 'none')+
+  geom_smooth(method = 'lm', color = 'red')+
+  xlab(label = 'Total Number of Steps')+
+  ylab(label = 'Calories')+
+  ggtitle(label = 'Relational Plot', 
+          subtitle = 'Total Steps and Calories')
+plot(csp)
+```
+        
+        - Kaggle Calories:Time Active
+```{r}
+##Following the same method as before, we use the same code to analyze this correlation
+##The difference here is the addition of the 'kaggletime' variable to sum the time active
+kaggletime <- kagdam2$very_active_minutes+
+  kagdam2$fairly_active_minutes+
+  kagdam2$lightly_active_minutes
+
+ctp<-ggplot(kagdam2, aes(y = calories, 
+                            x = kaggletime))+
+  geom_jitter(color = 'dodgerblue4', alpha = 0.3)+theme_light()+
+  theme(legend.position = 'none')+
+  geom_smooth(method = 'lm', color = 'red')+
+  xlab(label = 'Total Minutes Active')+
+  ylab(label = 'Calories')+
+  ggtitle(label = 'Relational Plot', 
+          subtitle = 'Time Active and Calories')
+plot(ctp)
+```
+        
+            - Kaggle Calories:Distance/Time
+```{r}
+##This time we add another calculation of total distance divided by total active time
+##This should give us an idea of any relation between speed of the activity, such as running/jogging/walking
+##This does come at the caveat of being only an estimation as there are many factors that would also come into play
+kaggletime <- kagdam2$very_active_minutes+
+  kagdam2$fairly_active_minutes+
+  kagdam2$lightly_active_minutes
+
+distime<-kagdam2$total_distance/kaggletime
+
+cdtp<-ggplot(kagdam2, aes(y = calories, 
+                            x = distime))+
+  geom_jitter(color = 'dodgerblue4', alpha = 0.3)+theme_light()+
+  theme(legend.position = 'none')+
+  geom_smooth(method = 'lm', color = 'red')+
+  xlab(label = 'Average Distance:Time')+
+  ylab(label = 'Calories')+
+  ggtitle(label = 'Relational Plot', 
+          subtitle = 'Calories and Distance:Time')
+plot(cdtp)
+```
+            
+          - Henriksen et al. Energy:Steps
+```{r}
+##For comparison and additional data from another source, let's follow the same steps for the Henriksen et al. data
+##This time the y axis is used for total active energy expenditure which is most likely in the form of calories but could not be confirmed
+cs3p<-henma3 %>%
+  ggplot(aes(y = xtotal_aee,
+             x= xmean_steps))+
+  geom_jitter(alpha = 0.5,
+             color = 'dodgerblue4')+theme_light()+
+  geom_smooth(method = 'lm', color = 'red')+
+  xlab(label = 'Total Steps Taken')+
+  ylab(label = 'Total Energy Expended')+
+  ggtitle(label = 'Relational Plot', 
+          subtitle = 'Steps Taken and Energy Expenditure')
+plot(cs3p)
+```
+          
+          - Henriksen et al. Energy:Time Active
+```{r}
+##Same data source as before but this time for how much time subject was active
+##Has same caveat as before
+ct3p<-henma3 %>%
+  ggplot(aes(y = x2020_aee,
+             x= xtotal_actime))+
+  geom_jitter(color = 'dodgerblue4',alpha = 0.5)+theme_light()+theme(legend.position = 'none')+
+  geom_smooth(method = 'lm', color = 'red')+
+  xlab(label = 'Total Time Active')+
+  ylab(label = 'Total Energy Expended')+
+  ggtitle(label = 'Relational Plot', 
+          subtitle = 'Time Active and Energy Expenditure')
+plot(ct3p)
+```
+          
+          - For side by side comparison, we will combine them 
+side by side
+```{r}
+ctp1 <-ctp + theme(plot.title = element_blank(), plot.subtitle = element_blank())
+ct3p1 <-ct3p + theme(plot.title = element_blank(), plot.subtitle = element_blank())
+ggdraw()+
+  draw_plot(ctp1, x = 0, y = 0, width = .5, height = .75)+
+  draw_plot(ct3p1, x = .5, y = 0, width = .5, height = .75)
+```
+   - Calories to Dist:Time and Energy to Time Active
+
+```{r}
+csp1 <-csp + theme(plot.title = element_blank(), plot.subtitle = element_blank())
+cs3p1 <-cs3p + theme(plot.title = element_blank(), plot.subtitle = element_blank())
+ggdraw()+
+  draw_plot(csp1, x = 0, y = 0, width = .5, height = .75)+
+  draw_plot(cs3p1, x = .5, y = 0, width = .5, height = .75)
+```
+ - Calories and Energy to Number of Steps Taken
+```{r}
+cdp1 <-cdp + theme(plot.title = element_blank(), plot.subtitle = element_blank())
+cdtp1 <-cdtp + theme(plot.title = element_blank(), plot.subtitle = element_blank())
+ggdraw()+
+  draw_plot(cdp1, x = 0, y = 0, width = .5, height = .75)+
+  draw_plot(cdtp1, x = .5, y = 0, width = .5, height = .75)
+```
+      - Comparison of Distance and Distance to Time
+
+#### **Act**
+
++ Taking these scatter plots and the data given, one would assume that neither distance, time nor number of steps holds more sway over the calories used.
+
++ However, due to the unusually scattered nature of the point in the plot for Energy:Steps from the Henriksen data, we should disregard that plot.
+  - Such a wide range of outcomes and the relatively horizontal slop of the line of best fit shows there is no significant data to be gained from this plot
+  - Even with this the steps variable does not show any significant advantage over the other variables.
+  
++ There is some evidence however that the corellation of calories from all three variables does appear to become less relevant.
+
++ Possible causes of this:
+  - Varying metabolisms of subjects,
+  - Battery life causing less accuracy over time, or
+  - Some unknown variable
+
++ And while Bellabeat cannot do anything regarding the metabolism nor the unknown variable, we can eliminate the last possible cause.
+
++ Working on bettering the battery life of our products would be the best way to address this issue with what we have control over. 
+
++ Another point of action we can take would be to implement a tracking feature with our devices for keeping track of our calorie requirements and our intake.
+
++ With additional research, we can hopefully narrow down an algorithm that would allow our fitness devices to calculate the number of calories our customers use on average a day.
+    - This would then increase in accuracy over time as more data is collected by the device, which should encourage continued use for the best benefit
+    
++ The value calculated would then allow our customers to compare their caloric intake with their expenditure, which would further allow them to make informed decision for their health, fitness and possible weight-loss needs.
